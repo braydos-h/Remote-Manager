@@ -3,6 +3,7 @@
 This project is a self-hosted dashboard for remotely monitoring and controlling a Windows machine. It exposes a simple web interface for common administrative tasks such as taking screenshots, adjusting system settings, viewing live performance data and browsing files.
 
 **Administrator privileges are recommended** when running the server to enable hardware controls like brightness and volume adjustment.
+![image](https://github.com/user-attachments/assets/bdfbcdcb-8124-49e7-a189-33cb3dab269d)
 
 ## Setup
 

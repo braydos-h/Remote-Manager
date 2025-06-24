@@ -1,0 +1,13 @@
+flask
+psutil
+pillow
+pynput
+opencv-python
+sounddevice
+soundfile
+GPUtil
+wmi
+pycaw
+comtypes
+requests
+werkzeug

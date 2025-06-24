@@ -1,54 +1,56 @@
-# .github/workflows/build.yml
 name: Windows build
 
 on:
   push:
     branches: [main]          # run on every push to main
-  workflow_dispatch:          # add a “Run workflow” button
+  workflow_dispatch:          # manual “Run workflow” button
 
 jobs:
   freeze:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣  Grab your repo code
+      # 1️⃣ Check out the repo
       - name: "📥 Checkout"
         uses: actions/checkout@v4
 
-      # 2️⃣  Install Python **3.11** (3.12 wheels are still sketchy)
+      # 2️⃣ Install Python 3.11 (3.12 wheels still flaky)
       - name: "🐍 Set up Python"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣  Install requirements and PyInstaller
-      - name: "📦 Install deps"
+      # 3️⃣ Install requirements + PyInstaller
+      - name: "📦 Install dependencies"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      # 4️⃣  Build your single-file EXE
-      #     shell: cmd → allows ^ line-continuations on Windows
+      # 4️⃣ Build the EXE from main/main.py
+      #    shell: cmd   → so the ^ line-continuations work in Windows
       - name: "🧊 Build EXE"
         shell: cmd
         run: >
-          pyinstaller app.py --onefile --noconsole ^
-            --add-data "templates;templates" ^
-            --add-data "static;static"
+          pyinstaller main\main.py                ^
+            --name RemoteDashboard                ^
+            --onefile --noconsole                 ^
+            --add-data "main\\templates;templates" ^
+            --add-data "main\\static;static"
 
-      # 5️⃣  Stash the EXE as a CI artifact
+      # 5️⃣ Upload the EXE as a workflow artifact
       - name: "📤 Upload artifact"
         uses: actions/upload-artifact@v4
         with:
           name: RemoteDashboard_exe
-          path: dist/app.exe
+          path: dist/RemoteDashboard.exe
 
-      # 6️⃣  (Optional) create a GitHub Release with the EXE attached
+      # 6️⃣ (Optional) tag & publish a GitHub Release
       - name: "🚀 Release"
+        if: github.ref == 'refs/heads/main' && startsWith(github.event_name, 'push')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: "Build ${{ github.run_number }}"
-          files: dist/app.exe
+          files: dist/RemoteDashboard.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

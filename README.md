@@ -1,4 +1,4 @@
-# Windows Remote Control Dashboard
+# Windows Manager
 
 This project is a self-hosted dashboard for remotely monitoring and controlling a Windows machine. It exposes a simple web interface for common administrative tasks such as taking screenshots, adjusting system settings, viewing live performance data and browsing files.
 

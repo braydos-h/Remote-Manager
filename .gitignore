@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Virtual environment directories
+venv/
+.venv/
+env/
+ENV/
+
+# Uploaded files in temporary upload folder
+remote_uploads/

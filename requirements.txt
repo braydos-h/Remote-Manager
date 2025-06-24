@@ -11,5 +11,5 @@ Pillow==10.3.0
 sounddevice==0.4.6
 soundfile==0.12.1
 pynput==1.7.6
-pycaw==20211229
+pycaw==20240210  # Updated for Python 3.12 compatibility
 comtypes==1.2.0

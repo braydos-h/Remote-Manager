@@ -1,0 +1,52 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # lets you click “Run workflow” in the Actions tab
+
+jobs:
+  freeze:
+    runs-on: windows-latest
+
+    steps:
+      # 1️⃣ Checkout repo
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+      # 2️⃣ Set up Python
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 3️⃣ Install deps
+      - name: "📦 Install deps"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      # 4️⃣ Build the EXE (cmd shell for the ^ continuations)
+      - name: "🧊 Build EXE"
+        shell: cmd
+        run: >
+          pyinstaller app.py --onefile --noconsole ^
+            --add-data "templates;templates" ^
+            --add-data "static;static"
+
+      # 5️⃣ Upload as CI artifact
+      - name: "📤 Upload artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDashboard_exe
+          path: dist/app.exe
+
+      # 6️⃣ (Optional) Publish a GitHub Release
+      - name: "🚀 Release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "Build ${{ github.run_number }}"
+          files: dist/app.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

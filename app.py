@@ -215,7 +215,6 @@ def list_processes() -> List[Dict[str, Any]]:
 ###############################################################################
 # File Browser helpers
 ###############################################################################
-BASE_DIR = Path.home().drive  # allow listing entire drive
 
 def safe_path(rel: str) -> Path:
     p = (Path("/") / rel.lstrip("/\\")).resolve()

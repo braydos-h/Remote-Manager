@@ -1,0 +1,21 @@
+# ---- core web stuff ----
+Flask==3.0.3
+Werkzeug==3.0.3
+requests==2.32.3
+
+# ---- system + hardware ----
+psutil==5.9.9
+GPUtil==1.4.0
+wmi==1.5.1          # pulls in pywin32; still add it below for the wheel
+pywin32==306
+
+# ---- media / capture ----
+Pillow==10.3.0       # for ImageGrab screenshots
+opencv-python==4.10.0.86
+sounddevice==0.4.6
+soundfile==0.12.1
+
+# ---- input / audio control ----
+pynput==1.7.6
+pycaw==20211229      # needs comtypes
+comtypes==1.2.0

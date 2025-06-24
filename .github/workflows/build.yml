@@ -1,50 +1,48 @@
+# .github/workflows/build.yml
 name: Windows build
 
 on:
   push:
-    branches: [main]          # run on every push to main
-  workflow_dispatch:          # manual “Run workflow” button
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   freeze:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣ Check out the repo
+      # 1️⃣  Checkout repo
       - name: "📥 Checkout"
         uses: actions/checkout@v4
 
-      # 2️⃣ Install Python 3.11 (3.12 wheels still flaky)
+      # 2️⃣  Python 3.11 (all wheels available)
       - name: "🐍 Set up Python"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ Install requirements + PyInstaller
+      # 3️⃣  Install deps + PyInstaller
       - name: "📦 Install dependencies"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      # 4️⃣ Build the EXE from main/main.py
-      #    shell: cmd   → so the ^ line-continuations work in Windows
+      # 4️⃣  Build EXE (NO templates/static lines)
       - name: "🧊 Build EXE"
         shell: cmd
         run: >
-          pyinstaller main\main.py                ^
-            --name RemoteDashboard                ^
-            --onefile --noconsole                 ^
-            --add-data "main\\templates;templates" ^
-            --add-data "main\\static;static"
+          pyinstaller main\main.py ^
+            --name RemoteDashboard ^
+            --onefile --noconsole
 
-      # 5️⃣ Upload the EXE as a workflow artifact
+      # 5️⃣  Upload artifact
       - name: "📤 Upload artifact"
         uses: actions/upload-artifact@v4
         with:
           name: RemoteDashboard_exe
           path: dist/RemoteDashboard.exe
 
-      # 6️⃣ (Optional) tag & publish a GitHub Release
+      # 6️⃣  Optional GitHub Release
       - name: "🚀 Release"
         if: github.ref == 'refs/heads/main' && startsWith(github.event_name, 'push')
         uses: softprops/action-gh-release@v2

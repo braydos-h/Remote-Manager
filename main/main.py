@@ -351,7 +351,14 @@ def webcam():
 def mic():
     if not sd:
         abort(501)
-    dur = float(request.args.get("sec", 5))
+    sec_raw = request.args.get("sec", "5")
+    try:
+        dur = float(sec_raw)
+    except (TypeError, ValueError):
+        abort(400)
+    if dur <= 0:
+        abort(400)
+    dur = min(dur, 10.0)
     fs = 44100
     rec = sd.rec(int(dur*fs), samplerate=fs, channels=1); sd.wait()
     tmp = io.BytesIO(); sf.write(tmp, rec, fs, format="WAV"); tmp.seek(0)

@@ -49,3 +49,7 @@ These HTTP endpoints provide the dashboard functionality and can also be called 
 
 The server exposes powerful system controls. Run it only on trusted networks and restrict access with a firewall or VPN. Administrator privileges allow deeper integration (brightness control, volume control, process management) but also increase risk if the service is exposed. Use strong passwords or additional authentication if deploying beyond a local test environment.
 
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

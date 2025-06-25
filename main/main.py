@@ -65,6 +65,11 @@ app = Flask(__name__)
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "remote_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Base directory for file browsing. Defaults to the current working
+# directory but can be overridden with the ``RM_BASE_DIR`` environment
+# variable.
+BASE_DIR = Path(os.environ.get("RM_BASE_DIR", Path.cwd())).resolve()
+
 ###############################################################################
 # 🔗 Cloudflared helper
 ###############################################################################
@@ -244,7 +249,13 @@ def list_processes() -> List[Dict[str, Any]]:
 ###############################################################################
 
 def safe_path(rel: str) -> Path:
-    p = (Path("/") / rel.lstrip("/\\")).resolve()
+    """Return absolute path within :data:`BASE_DIR`.
+
+    Raises ``ValueError`` if the resolved path escapes ``BASE_DIR``.
+    """
+    p = (BASE_DIR / rel.lstrip("/\\")).resolve()
+    if BASE_DIR != p and BASE_DIR not in p.parents:
+        raise ValueError("Path outside base directory")
     return p
 
 ###############################################################################
@@ -297,13 +308,23 @@ def power(cmd):
 @app.route("/brightness", methods=["GET", "POST"])
 def bright():
     if request.method == "POST":
-        set_brightness(int(request.json["level"]))
+        data = request.get_json(silent=True) or {}
+        if "level" not in data:
+            abort(400)
+        level = int(data["level"])
+        level = max(0, min(100, level))
+        set_brightness(level)
     return jsonify(level=get_brightness())
 
 @app.route("/volume", methods=["GET", "POST"])
 def vol():
     if request.method == "POST":
-        set_volume(int(request.json["level"]))
+        data = request.get_json(silent=True) or {}
+        if "level" not in data:
+            abort(400)
+        level = int(data["level"])
+        level = max(0, min(100, level))
+        set_volume(level)
     return jsonify(level=get_volume())
 
 @app.route("/screenshot")
@@ -317,6 +338,9 @@ def webcam():
     if not cv2:
         abort(501)
     cam = cv2.VideoCapture(0)
+    if not cam.isOpened():
+        cam.release()
+        return abort(500)
     ret, frame = cam.read(); cam.release()
     if not ret:
         abort(500)
@@ -327,7 +351,14 @@ def webcam():
 def mic():
     if not sd:
         abort(501)
-    dur = float(request.args.get("sec", 5))
+    sec_raw = request.args.get("sec", "5")
+    try:
+        dur = float(sec_raw)
+    except (TypeError, ValueError):
+        abort(400)
+    if dur <= 0:
+        abort(400)
+    dur = min(dur, 10.0)
     fs = 44100
     rec = sd.rec(int(dur*fs), samplerate=fs, channels=1); sd.wait()
     tmp = io.BytesIO(); sf.write(tmp, rec, fs, format="WAV"); tmp.seek(0)
@@ -378,7 +409,10 @@ def start_proc():
 @app.route("/files")
 
 def listing():
-    p = safe_path(request.args.get("path", ""))
+    try:
+        p = safe_path(request.args.get("path", ""))
+    except ValueError:
+        abort(403)
     if not p.exists():
         abort(404)
     if p.is_file():
@@ -396,7 +430,10 @@ def listing():
 @app.route("/download")
 
 def download():
-    p = safe_path(request.args.get("path", ""))
+    try:
+        p = safe_path(request.args.get("path", ""))
+    except ValueError:
+        abort(403)
     if not p.is_file():
         abort(404)
     return send_file(p, as_attachment=True)

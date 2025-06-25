@@ -17,7 +17,7 @@ pip install flask psutil pillow pynput opencv-python sounddevice soundfile GPUti
 3. Start the application:
 
 ```bash
-python app.py
+python main/main.py
 ```
 
 Then open `http://localhost:5000` in a browser to access the dashboard.
@@ -48,13 +48,3 @@ These HTTP endpoints provide the dashboard functionality and can also be called 
 ## Security Considerations
 
 The server exposes powerful system controls. Run it only on trusted networks and restrict access with a firewall or VPN. Administrator privileges allow deeper integration (brightness control, volume control, process management) but also increase risk if the service is exposed. Use strong passwords or additional authentication if deploying beyond a local test environment.
-
-## Running Tests
-
-The repository includes a small pytest suite exercising a few JSON API endpoints.
-After installing dependencies (plus `pytest`), simply run:
-
-```bash
-pytest
-```
-

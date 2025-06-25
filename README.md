@@ -17,7 +17,7 @@ pip install flask psutil pillow pynput opencv-python sounddevice soundfile GPUti
 3. Start the application:
 
 ```bash
-python app.py
+python main/main.py
 ```
 
 Then open `http://localhost:5000` in a browser to access the dashboard.

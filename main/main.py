@@ -65,6 +65,11 @@ app = Flask(__name__)
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "remote_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Base directory for file browsing. Defaults to the current working
+# directory but can be overridden with the ``RM_BASE_DIR`` environment
+# variable.
+BASE_DIR = Path(os.environ.get("RM_BASE_DIR", Path.cwd())).resolve()
+
 ###############################################################################
 # 🔗 Cloudflared helper
 ###############################################################################
@@ -244,7 +249,13 @@ def list_processes() -> List[Dict[str, Any]]:
 ###############################################################################
 
 def safe_path(rel: str) -> Path:
-    p = (Path("/") / rel.lstrip("/\\")).resolve()
+    """Return absolute path within :data:`BASE_DIR`.
+
+    Raises ``ValueError`` if the resolved path escapes ``BASE_DIR``.
+    """
+    p = (BASE_DIR / rel.lstrip("/\\")).resolve()
+    if BASE_DIR != p and BASE_DIR not in p.parents:
+        raise ValueError("Path outside base directory")
     return p
 
 ###############################################################################
@@ -378,7 +389,10 @@ def start_proc():
 @app.route("/files")
 
 def listing():
-    p = safe_path(request.args.get("path", ""))
+    try:
+        p = safe_path(request.args.get("path", ""))
+    except ValueError:
+        abort(403)
     if not p.exists():
         abort(404)
     if p.is_file():
@@ -396,7 +410,10 @@ def listing():
 @app.route("/download")
 
 def download():
-    p = safe_path(request.args.get("path", ""))
+    try:
+        p = safe_path(request.args.get("path", ""))
+    except ValueError:
+        abort(403)
     if not p.is_file():
         abort(404)
     return send_file(p, as_attachment=True)

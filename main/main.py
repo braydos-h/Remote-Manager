@@ -317,6 +317,9 @@ def webcam():
     if not cv2:
         abort(501)
     cam = cv2.VideoCapture(0)
+    if not cam.isOpened():
+        cam.release()
+        return abort(500)
     ret, frame = cam.read(); cam.release()
     if not ret:
         abort(500)

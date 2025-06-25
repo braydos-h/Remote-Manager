@@ -297,13 +297,23 @@ def power(cmd):
 @app.route("/brightness", methods=["GET", "POST"])
 def bright():
     if request.method == "POST":
-        set_brightness(int(request.json["level"]))
+        data = request.get_json(silent=True) or {}
+        if "level" not in data:
+            abort(400)
+        level = int(data["level"])
+        level = max(0, min(100, level))
+        set_brightness(level)
     return jsonify(level=get_brightness())
 
 @app.route("/volume", methods=["GET", "POST"])
 def vol():
     if request.method == "POST":
-        set_volume(int(request.json["level"]))
+        data = request.get_json(silent=True) or {}
+        if "level" not in data:
+            abort(400)
+        level = int(data["level"])
+        level = max(0, min(100, level))
+        set_volume(level)
     return jsonify(level=get_volume())
 
 @app.route("/screenshot")

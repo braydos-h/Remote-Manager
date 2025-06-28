@@ -409,10 +409,14 @@ def start_proc():
 @app.route("/files")
 
 def listing():
-    try:
-        p = safe_path(request.args.get("path", ""))
-    except ValueError:
-        abort(403)
+    rel = request.args.get("path", "")
+    if os.path.isabs(rel):
+        p = Path(rel)
+    else:
+        try:
+            p = safe_path(rel)
+        except ValueError:
+            abort(403)
     if not p.exists():
         abort(404)
     if p.is_file():
@@ -452,11 +456,13 @@ def upload():
 INDEX_HTML = r"""
 <!DOCTYPE html><html lang='en'><head>
 <meta charset='UTF-8'><title>Remote Dashboard</title>
-<link href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css' rel='stylesheet'>
+<link href='https://cdnjs.cloudflare.com/ajax/libs/bootswatch/5.3.3/flatly/bootstrap.min.css' rel='stylesheet'>
+<link href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css' rel='stylesheet'>
 <script src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js'></script>
-<style>body{background:#f8f9fa}.card{margin-bottom:1rem}</style></head>
-<body><div class='container py-3'>
-<h1 class='mb-3'>Remote Control Dashboard</h1>
+<style>body{background:#f8f9fa;font-family:"Segoe UI",Tahoma,sans-serif}.card{margin-bottom:1rem}.chart-card{padding:1rem}</style></head>
+<body>
+<nav class='navbar navbar-dark bg-primary mb-4'><div class='container-fluid'><span class='navbar-brand'>Remote Control Dashboard</span></div></nav>
+<div class='container'>
 <div class='row'>
   <div class='col-lg-4'>
     <div class='card'><div class='card-header'>Status</div><div class='card-body' id='stat'></div></div>
@@ -477,8 +483,14 @@ INDEX_HTML = r"""
     </div></div>
   </div>
   <div class='col-lg-8'>
-    <canvas id='cpuC' height='120'></canvas>
-    <canvas id='ramC' height='120'></canvas>
+    <div class='row'>
+      <div class='col-md-6'>
+        <div class='card chart-card'><div class='card-body'><h6 class="card-title mb-2">CPU</h6><canvas id='cpuC' height='120'></canvas></div></div>
+      </div>
+      <div class='col-md-6'>
+        <div class='card chart-card'><div class='card-body'><h6 class="card-title mb-2">RAM</h6><canvas id='ramC' height='120'></canvas></div></div>
+      </div>
+    </div>
     <div class='card mt-2'><div class='card-header'>Processes</div><div class='card-body'><table class='table table-sm' id='procT'></table></div></div>
   </div>
 </div>
